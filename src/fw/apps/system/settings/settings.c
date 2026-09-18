@@ -29,6 +29,9 @@
 // Icon resource IDs for each settings menu item (RESOURCE_ID_INVALID means no icon)
 static const uint32_t SETTINGS_MENU_ICON_RESOURCES[SettingsMenuItem_Count] = {
   [SettingsMenuItemBluetooth] = RESOURCE_ID_SETTINGS_MENU_ICON_BLUETOOTH,
+#ifdef CONFIG_BT_KEYBOARD
+  [SettingsMenuItemKeyboard] = RESOURCE_ID_SETTINGS_MENU_ICON_BLUETOOTH,
+#endif
   [SettingsMenuItemNotifications] = RESOURCE_ID_SETTINGS_MENU_ICON_NOTIFICATIONS,
   [SettingsMenuItemVibrations] = RESOURCE_ID_SETTINGS_MENU_ICON_VIBRATIONS,
   [SettingsMenuItemQuietTime] = RESOURCE_ID_SETTINGS_MENU_ICON_QUIET_TIME,
