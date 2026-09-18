@@ -170,7 +170,7 @@ static void prv_forget(void) {
   ble_addr_t peer;
   if (nimble_keyboard_store_get(&peer, NULL)) {
     // Remove controller and in-memory keys while this is still classified as an accessory.
-    int rc = prv_allowed() ? ble_gap_unpair(&peer) : ble_store_util_delete_peer(&peer);
+    int rc = ble_hs_is_enabled() ? ble_gap_unpair(&peer) : ble_store_util_delete_peer(&peer);
     if (rc) {
       s_forget_pending = false;
       prv_publish(BTKeyboardStateError, rc);
@@ -181,7 +181,7 @@ static void prv_forget(void) {
   if (rc) {
     // A failed flash write must leave the existing bond usable in this session.
     nimble_keyboard_store_restore_keys();
-    s_restore_irk_pending = prv_allowed() && nimble_keyboard_store_restore_irk() != 0;
+    s_restore_irk_pending = ble_hs_is_enabled() && nimble_keyboard_store_restore_irk() != 0;
   }
   s_forget_pending = false;
   s_have_peer = false;

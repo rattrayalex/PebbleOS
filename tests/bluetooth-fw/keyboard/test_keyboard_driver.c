@@ -26,6 +26,8 @@ static bool s_bonded;
 static int s_commit_error;
 static int s_forget_error;
 static int s_restore_irk_count;
+static bool s_host_enabled;
+static int s_unpair_count;
 static int s_connect_count;
 static int s_scan_count;
 static bool s_advertises_hid = true;
@@ -139,7 +141,11 @@ int ble_store_util_delete_peer(const ble_addr_t *peer) {
   return 0;
 }
 int ble_gap_unpair(const ble_addr_t *peer) {
+  ++s_unpair_count;
   return 0;
+}
+int ble_hs_is_enabled(void) {
+  return s_host_enabled;
 }
 
 void bt_keyboard_release_buttons(void) {
@@ -300,6 +306,8 @@ void test_keyboard_driver__initialize(void) {
   prv_drain();
   nimble_keyboard_init();
   s_bonded = false;
+  s_host_enabled = true;
+  s_unpair_count = 0;
   s_scan_count = s_forget_error = s_restore_irk_count = 0;
   s_advertises_hid = true;
   s_commit_error = s_connect_count = s_terminate_count = s_discover_count = s_privacy_count = 0;
@@ -471,11 +479,32 @@ void test_keyboard_driver__reset_invalidates_already_queued_pair_request(void) {
 }
 
 void test_keyboard_driver__forget_works_with_bluetooth_off(void) {
+  s_host_enabled = false;
   s_bonded = true;
   bt_keyboard_forget();
   prv_drain();
   cl_assert(!s_bonded);
+  cl_assert_equal_i(0, s_unpair_count);
   cl_assert_equal_i(BTKeyboardStateDisabled, prv_status().state);
+}
+
+void test_keyboard_driver__forget_removes_controller_irk_before_commands_are_enabled(void) {
+  s_bonded = true;
+  bt_keyboard_forget();
+  prv_drain();
+  cl_assert(!s_bonded);
+  cl_assert_equal_i(1, s_unpair_count);
+  cl_assert_equal_i(BTKeyboardStateDisabled, prv_status().state);
+}
+
+void test_keyboard_driver__failed_forget_restores_irk_before_commands_are_enabled(void) {
+  s_bonded = true;
+  s_forget_error = BLE_HS_ESTORE_FAIL;
+  bt_keyboard_forget();
+  prv_drain();
+  cl_assert(s_bonded);
+  cl_assert_equal_i(1, s_unpair_count);
+  cl_assert_equal_i(1, s_restore_irk_count);
 }
 
 void test_keyboard_driver__scan_response_requires_prior_connectable_advertisement(void) {
