@@ -129,6 +129,10 @@ typedef enum {
   PEBBLE_SPEAKER_EVENT,
   PEBBLE_BACKLIGHT_EVENT,
 
+  // Internal keyboard input, merged with other buttons by KernelMain.
+  PEBBLE_KEYBOARD_BUTTON_DOWN_EVENT,
+  PEBBLE_KEYBOARD_BUTTON_UP_EVENT,
+
   PEBBLE_NUM_EVENTS
 } PebbleEventType;
 

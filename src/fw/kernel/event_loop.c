@@ -2,6 +2,10 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 
 #include "event_loop.h"
+
+#ifdef CONFIG_BT_KEYBOARD
+#include "kernel/keyboard_input.h"
+#endif
 #include "events.h"
 
 #include <stdio.h>
@@ -613,6 +617,11 @@ void launcher_main_loop(void) {
     // We make this PebbleEvent static to save stack space
     static PebbleEvent e;
     if (event_take_timeout(&e, 1000)) {
+#ifdef CONFIG_BT_KEYBOARD
+      if (!keyboard_input_filter_event(&e)) {
+        continue;
+      }
+#endif
       const PebbleTaskBitset kernel_main_task_bit = (1 << PebbleTask_KernelMain);
       const bool is_not_masked_out_from_kernel_main = !(e.task_mask & kernel_main_task_bit);
       if (is_not_masked_out_from_kernel_main) {
