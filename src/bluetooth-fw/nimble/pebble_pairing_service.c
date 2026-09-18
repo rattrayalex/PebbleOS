@@ -12,11 +12,23 @@
 #include <system/passert.h>
 
 #include "nimble_type_conversions.h"
+#ifdef CONFIG_BT_KEYBOARD
+#include "keyboard_internal.h"
+#endif
 
 PBL_LOG_MODULE_DECLARE(bt, CONFIG_BT_LOG_LEVEL);
 
 #define TRIGGER_PAIRING_NO_SEC_REQ    (1U << 1U)
 #define TRIGGER_PAIRING_FORCE_SEC_REQ (1U << 2U)
+
+#ifdef CONFIG_BT_KEYBOARD
+static int prv_count_gateway_bond(int obj_type, union ble_store_value *value, void *context) {
+  if (!nimble_keyboard_owns_peer(&value->sec.peer_addr)) {
+    ++*(int *)context;
+  }
+  return 0;
+}
+#endif
 
 static int pebble_pairing_service_get_connectivity_status(
     uint16_t conn_handle, PebblePairingServiceConnectivityStatus *status) {
@@ -36,7 +48,11 @@ static int pebble_pairing_service_get_connectivity_status(
   bool is_bonded = (ble_store_read_peer_sec(&key_sec, &value_sec) == 0);
 
   int bond_count = 0;
+#ifdef CONFIG_BT_KEYBOARD
+  ble_store_iterate(BLE_STORE_OBJ_TYPE_PEER_SEC, prv_count_gateway_bond, &bond_count);
+#else
   ble_store_util_count(BLE_STORE_OBJ_TYPE_PEER_SEC, &bond_count);
+#endif
 
   memset(status, 0, sizeof(*status));
   status->ble_is_connected = true;

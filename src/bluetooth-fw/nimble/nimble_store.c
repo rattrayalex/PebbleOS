@@ -16,6 +16,9 @@
 #include <pbl/util/list.h>
 
 #include "nimble_type_conversions.h"
+#ifdef CONFIG_BT_KEYBOARD
+#include "keyboard_internal.h"
+#endif
 
 PBL_LOG_MODULE_DECLARE(bt, CONFIG_BT_LOG_LEVEL);
 
@@ -249,6 +252,16 @@ static int prv_nimble_store_write_sec(const int obj_type,
     return BLE_HS_ENOTSUP;
   }
 
+#ifdef CONFIG_BT_KEYBOARD
+  if (nimble_keyboard_owns_peer(&value_sec->peer_addr)) {
+    int rc = nimble_keyboard_store_capture(obj_type, value_sec);
+    if (rc == 0) {
+      prv_nimble_store_upsert_sec(obj_type, value_sec);
+    }
+    return rc;
+  }
+#endif
+
   prv_nimble_store_upsert_sec(obj_type, value_sec);
 
   NimbleStoreSecWrittenContext *ctx = kernel_malloc_check(sizeof(*ctx));
@@ -281,9 +294,16 @@ static int prv_nimble_store_delete_sec(int obj_type, const struct ble_store_key_
   list_remove((ListNode *)s, sec_list, NULL);
   pbl_mutex_unlock(&s_store_mutex);
 
+  // An indexed delete may have BLE_ADDR_ANY as the key; use the actual peer.
+  ble_addr_t peer = s->value_sec.peer_addr;
   kernel_free(s);
+#ifdef CONFIG_BT_KEYBOARD
+  if (nimble_keyboard_owns_peer(&peer)) {
+    return 0;
+  }
+#endif
 
-  nimble_addr_to_pebble_device(&key_sec->peer_addr, &device);
+  nimble_addr_to_pebble_device(&peer, &device);
   PBL_LOG_INFO("SEC delete: obj=%d addr=" BT_DEVICE_ADDRESS_FMT, obj_type,
                BT_DEVICE_ADDRESS_XPLODE(device.address));
   bt_persistent_storage_delete_ble_pairing_by_addr(&device);
@@ -623,3 +643,9 @@ void bt_driver_handle_host_removed_cccd(const BleCCCD *cccd) {
 
   pbl_mutex_unlock(&s_store_mutex);
 }
+
+#ifdef CONFIG_BT_KEYBOARD
+void nimble_store_restore_keyboard_sec(int obj_type, const struct ble_store_value_sec *value) {
+  prv_nimble_store_upsert_sec(obj_type, value);
+}
+#endif

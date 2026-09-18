@@ -21,6 +21,9 @@
 #include <system/passert.h>
 
 #include "nimble_store.h"
+#ifdef CONFIG_BT_KEYBOARD
+#include "keyboard_internal.h"
+#endif
 
 PBL_LOG_MODULE_DEFINE(bt, CONFIG_BT_LOG_LEVEL);
 
@@ -57,9 +60,15 @@ static void prv_sync_cb(void) {
   PBL_LOG_DBG("NimBLE host synchronized");
   pbl_sem_give(&s_host_started);
   bt_driver_handle_host_resynced();
+#ifdef CONFIG_BT_KEYBOARD
+  nimble_keyboard_resynced();
+#endif
 }
 
 static void prv_reset_cb(int reason) {
+#ifdef CONFIG_BT_KEYBOARD
+  nimble_keyboard_stopped(NULL, NULL);
+#endif
   PBL_LOG_WRN("NimBLE host reset (reason: 0x%04x)", (uint16_t)reason);
 #ifdef CONFIG_SOC_SF32LB52
   // Controller stopped answering HCI. Crash so the coredump captures LCPU RAM
@@ -77,8 +86,18 @@ static void prv_host_task_main(void *unused) {
   nimble_port_run();
 }
 
-static void prv_ble_hs_stop_cb(int status, void *arg) {
+#ifdef CONFIG_BT_KEYBOARD
+static void prv_keyboard_stopped(void *context) {
   pbl_sem_give(&s_host_stopped);
+}
+#endif
+
+static void prv_ble_hs_stop_cb(int status, void *arg) {
+#ifdef CONFIG_BT_KEYBOARD
+  nimble_keyboard_stopped(prv_keyboard_stopped, NULL);
+#else
+  pbl_sem_give(&s_host_stopped);
+#endif
 }
 
 // ----------------------------------------------------------------------------------------
@@ -90,6 +109,9 @@ void bt_driver_init(void) {
 
   nimble_port_init();
   nimble_store_init();
+#ifdef CONFIG_BT_KEYBOARD
+  nimble_keyboard_init();
+#endif
 
   struct pbl_thread_attr host_attr = {
     .name = "NimbleHost",
@@ -116,6 +138,11 @@ void bt_driver_init(void) {
   s_ll_task_handle = pebble_task_create(PebbleTask_BTController, &ll_attr);
   PBL_ASSERTN(s_ll_task_handle);
 #endif
+#ifdef CONFIG_BT_KEYBOARD
+  // The host event loop is running and the normal filesystem is mounted.
+  // Expose the saved bond even when booting with Bluetooth disabled.
+  nimble_keyboard_prepare();
+#endif
 }
 
 bool bt_driver_start(BTDriverConfig *config) {
@@ -133,6 +160,9 @@ bool bt_driver_start(BTDriverConfig *config) {
   }
 
   s_driver_state = DriverStateStarting;
+#ifdef CONFIG_BT_KEYBOARD
+  nimble_keyboard_prepare();
+#endif
   // Drain a stale host_started signal (e.g. from an autonomous host re-sync)
   // so we wait for *this* start to sync.
   (void)(pbl_sem_take(&s_host_started, PBL_NO_WAIT) == 0);
@@ -169,6 +199,9 @@ bool bt_driver_start(BTDriverConfig *config) {
   }
 
   s_driver_state = DriverStateStarted;
+#ifdef CONFIG_BT_KEYBOARD
+  nimble_keyboard_start();
+#endif
   return true;
 
 err:
@@ -194,6 +227,9 @@ err:
 
 void bt_driver_stop(void) {
   bool f_rc;
+#ifdef CONFIG_BT_KEYBOARD
+  nimble_keyboard_disallow();
+#endif
 
   s_driver_state = DriverStateStopping;
   (void)(pbl_sem_take(&s_host_stopped, PBL_NO_WAIT) == 0);

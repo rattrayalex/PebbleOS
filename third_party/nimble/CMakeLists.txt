@@ -74,6 +74,18 @@ elseif(CONFIG_SOC_SF32LB52)
   endif()
 endif()
 
+if(CONFIG_BT_KEYBOARD)
+  pbl_compile_definitions(
+    MYNEWT_VAL_BLE_MAX_CONNECTIONS=2
+    MYNEWT_VAL_BLE_SM_MAX_PROCS=2
+    MYNEWT_VAL_BLE_STORE_MAX_BONDS=4
+  )
+  if(CONFIG_SOC_NRF52)
+    # Three phone bonds, one keyboard bond, and the local IRK entry.
+    pbl_compile_definitions(MYNEWT_VAL_BLE_LL_RESOLV_LIST_SIZE=5)
+  endif()
+endif()
+
 pbl_include_directories(${includes})
 
 pbl_library_named(nimble)
