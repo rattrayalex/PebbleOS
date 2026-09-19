@@ -556,7 +556,14 @@ static int prv_gap_event(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_DISC_COMPLETE:
       if (current && s_scanning) {
         s_scanning = false;
-        prv_fail(BLE_HS_ETIMEOUT);
+        if (event->disc_complete.reason) {
+          prv_fail(event->disc_complete.reason);
+        } else {
+          PBL_LOG_DBG("Keyboard scan timed out");
+          s_reconnect = false;
+          prv_publish(BTKeyboardStateError, BLE_HS_ETIMEOUT);
+          prv_cancel();
+        }
       }
       break;
     case BLE_GAP_EVENT_CONNECT:
@@ -623,8 +630,7 @@ static int prv_gap_event(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_PAIRING_COMPLETE:
       if (current && event->pairing_complete.conn_handle == s_conn &&
           event->pairing_complete.status) {
-        // Reconnect failures receive a precise host status in the following ENC_CHANGE event.
-        // Pairing's raw SMP status cannot distinguish a transport timeout from a bad key.
+        // Use ENC_CHANGE's host status to classify reconnect failures.
         if (s_pair_requested) {
           prv_fail(event->pairing_complete.status);
         } else {
@@ -656,7 +662,7 @@ static int prv_gap_event(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_CONN_UPDATE_REQ:
     case BLE_GAP_EVENT_L2CAP_UPDATE_REQ:
       if (!current || event->conn_update_req.conn_handle != s_conn) {
-        return BLE_ERR_UNK_CONN_ID;
+        return BLE_ERR_CONN_PARMS;
       }
       *event->conn_update_req.self_params = *event->conn_update_req.peer_params;
       prv_bound_connection_params(event->conn_update_req.self_params);

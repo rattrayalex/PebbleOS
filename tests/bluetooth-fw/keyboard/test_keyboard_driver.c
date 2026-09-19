@@ -12,10 +12,12 @@
 #include <host/ble_sm.h>
 #include <nimble/nimble_port.h>
 #include <os/os_mbuf.h>
+#define CUSTOM_LOG_INTERNAL
 #include "stubs_logging.h"
 #include "stubs_mutex.h"
 
 static struct ble_npl_eventq s_queue;
+static unsigned s_warning_count;
 static struct ble_npl_event *s_events[32];
 static size_t s_event_count;
 static struct ble_npl_callout *s_callout;
@@ -58,6 +60,13 @@ static ble_gatt_dsc_fn *s_descriptor_cb;
 static ble_gatt_attr_fn *s_subscribe_cb;
 static void *s_gatt_arg;
 static ble_addr_t s_saved = {.type = BLE_ADDR_RANDOM, .val = {1, 2, 3, 4, 5, 0xc6}};
+
+static void log_internal(uint8_t log_level, const char *src_filename, int src_line_number,
+                         const char *fmt, va_list args) {
+  if (log_level == LOG_LEVEL_WARNING || log_level == LOG_LEVEL_ERROR) {
+    ++s_warning_count;
+  }
+}
 
 void *kernel_malloc_check(size_t size) {
   return malloc(size);
@@ -327,6 +336,7 @@ void test_keyboard_driver__initialize(void) {
   s_kernel_callback = NULL;
   s_kernel_context = NULL;
   s_status_events = 0;
+  s_warning_count = 0;
   s_in_kernel_callback = false;
   s_host_enabled = true;
   s_unpair_count = 0;
@@ -845,4 +855,59 @@ void test_keyboard_driver__unchanged_status_does_not_send_another_event(void) {
   prv_drain();
   prv_drain_kernel();
   cl_assert_equal_i(events, s_status_events);
+}
+
+void test_keyboard_driver__scan_timeout_is_expected_and_allows_another_pair(void) {
+  nimble_keyboard_start();
+  prv_drain();
+  bt_keyboard_pair();
+  prv_drain();
+  prv_gap((struct ble_gap_event){.type = BLE_GAP_EVENT_DISC_COMPLETE});
+  cl_assert_equal_i(BTKeyboardStateError, prv_status().state);
+  cl_assert_equal_i(BLE_HS_ETIMEOUT, prv_status().error);
+  cl_assert_equal_i(0, s_warning_count);
+  cl_assert(!s_timer_active);
+  bt_keyboard_pair();
+  prv_drain();
+  cl_assert_equal_i(BTKeyboardStateScanning, prv_status().state);
+  cl_assert_equal_i(2, s_scan_count);
+}
+
+void test_keyboard_driver__scan_host_error_is_preserved_and_warns(void) {
+  nimble_keyboard_start();
+  prv_drain();
+  bt_keyboard_pair();
+  prv_drain();
+  prv_gap((struct ble_gap_event){
+    .type = BLE_GAP_EVENT_DISC_COMPLETE,
+    .disc_complete.reason = BLE_HS_ECONTROLLER
+  });
+  cl_assert_equal_i(BTKeyboardStateError, prv_status().state);
+  cl_assert_equal_i(BLE_HS_ECONTROLLER, prv_status().error);
+  cl_assert_equal_i(1, s_warning_count);
+  cl_assert(!s_timer_active);
+}
+
+void test_keyboard_driver__unowned_update_is_rejected_without_changing_parameters(void) {
+  prv_start_pair();
+  struct ble_gap_upd_params requested =
+      {.itvl_min = 6, .itvl_max = 3200, .latency = 499, .supervision_timeout = 10};
+  const struct ble_gap_upd_params original = {
+    .itvl_min = 24,
+    .itvl_max = 40,
+    .supervision_timeout = 400
+  };
+  const uint8_t types[] = {BLE_GAP_EVENT_CONN_UPDATE_REQ, BLE_GAP_EVENT_L2CAP_UPDATE_REQ};
+  for (size_t i = 0; i < sizeof(types); ++i) {
+    struct ble_gap_upd_params result = original;
+    struct ble_gap_event event = {
+      .type = types[i],
+      .conn_update_req = {.conn_handle = 8, .peer_params = &requested, .self_params = &result}
+    };
+    cl_assert_equal_i(BLE_ERR_CONN_PARMS, s_gap(&event, s_gap_arg));
+    cl_assert_equal_m(&original, &result, sizeof(result));
+    event.conn_update_req.conn_handle = 7;
+    cl_assert_equal_i(BLE_ERR_CONN_PARMS, s_gap(&event, (void *)((uintptr_t)s_gap_arg - 1)));
+    cl_assert_equal_m(&original, &result, sizeof(result));
+  }
 }
