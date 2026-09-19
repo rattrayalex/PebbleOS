@@ -20,6 +20,8 @@ typedef struct {
   char name[32];
 } KeyboardBond;
 
+_Static_assert(sizeof(KeyboardBond) == 73, "Changing the bond record requires a version migration");
+
 static const char s_file_name[] = "bt_keyboard";
 static const uint8_t s_bond_key = 1;
 static KeyboardBond s_bond;

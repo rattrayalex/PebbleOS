@@ -132,6 +132,7 @@ typedef enum {
   // Internal keyboard input, merged with other buttons by KernelMain.
   PEBBLE_KEYBOARD_BUTTON_DOWN_EVENT,
   PEBBLE_KEYBOARD_BUTTON_UP_EVENT,
+  PEBBLE_BT_KEYBOARD_STATUS_CHANGED_EVENT,
 
   PEBBLE_NUM_EVENTS
 } PebbleEventType;

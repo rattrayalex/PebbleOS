@@ -13,6 +13,7 @@ void nimble_keyboard_disallow(void);
 void nimble_keyboard_stopped(void (*complete)(void *), void *context);
 void nimble_keyboard_resynced(void);
 bool nimble_keyboard_owns_peer(const ble_addr_t *peer);
+bool nimble_keyboard_has_gateway_bond(void);
 
 //! All store operations run on the host thread, including the load before host startup.
 void nimble_keyboard_store_load(void);

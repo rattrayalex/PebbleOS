@@ -13,6 +13,7 @@ typedef enum {
   BTKeyboardStateScanning,
   BTKeyboardStateConnecting,
   BTKeyboardStatePairing,
+  BTKeyboardStateEncrypting,
   BTKeyboardStateDiscovering,
   BTKeyboardStateConnected,
   BTKeyboardStateError,

@@ -7,6 +7,7 @@
 #include <host/ble_hs.h>
 #include <host/ble_sm.h>
 #include <kernel/pbl_malloc.h>
+#include <kernel/event_loop.h>
 #include <nimble/nimble_port.h>
 #include <os/os_mbuf.h>
 #include <pbl/kernel/mutex.h>
@@ -29,6 +30,8 @@ PBL_LOG_MODULE_DECLARE(bt, CONFIG_BT_LOG_LEVEL);
 #define SCAN_TIMEOUT_MS     30000
 #define CONNECT_TIMEOUT_MS  10000
 #define RECONNECT_DELAY_MS  60000
+#define MAX_CONN_INTERVAL   160  // 200 ms in 1.25 ms units.
+#define MAX_IDLE_INTERVAL   3200 // Up to four seconds of peripheral sleep.
 
 static const ble_uuid16_t s_hid_uuid = BLE_UUID16_INIT(HID_SERVICE_UUID);
 static PBL_MUTEX_DEFINE(s_status_mutex);
@@ -36,6 +39,7 @@ static PBL_SEM_DEFINE(s_prepared, 0, 1);
 static BTKeyboardStatus s_status = {.state = BTKeyboardStateDisabled};
 static BTKeyboardStatus s_public_status = {.state = BTKeyboardStateDisabled};
 static bool s_allowed;
+static bool s_status_notify_pending;
 static uint32_t s_request_epoch;
 static void (*s_stop_complete)(void *);
 static void *s_stop_context;
@@ -88,6 +92,14 @@ static bool prv_allowed(void) {
   return allowed;
 }
 
+static void prv_status_changed(void *context) {
+  pbl_mutex_lock(&s_status_mutex, PBL_FOREVER);
+  s_status_notify_pending = false;
+  pbl_mutex_unlock(&s_status_mutex);
+  PebbleEvent event = {.type = PEBBLE_BT_KEYBOARD_STATUS_CHANGED_EVENT};
+  event_put(&event);
+}
+
 static void prv_publish(BTKeyboardState state, int error) {
   s_status.state = state;
   s_status.error = error;
@@ -97,8 +109,23 @@ static void prv_publish(BTKeyboardState state, int error) {
     s_status.passkey = 0;
   }
   pbl_mutex_lock(&s_status_mutex, PBL_FOREVER);
+  BTKeyboardState previous = s_public_status.state;
+  bool changed = previous != state || s_public_status.error != error ||
+                 s_public_status.bonded != s_status.bonded ||
+                 s_public_status.passkey_valid != s_status.passkey_valid ||
+                 s_public_status.passkey != s_status.passkey ||
+                 memcmp(s_public_status.name, s_status.name, sizeof(s_status.name)) != 0;
   s_public_status = s_status;
+  bool notify = changed && !s_status_notify_pending;
+  s_status_notify_pending |= notify;
   pbl_mutex_unlock(&s_status_mutex);
+  if (changed) {
+    PBL_LOG_DBG("Keyboard state %u -> %u (rc=0x%04x)", previous, state, (uint16_t)error);
+  }
+  if (notify) {
+    // The payload-free event is emitted on KernelMain; subscribers read the latest status.
+    launcher_task_add_callback(prv_status_changed, NULL);
+  }
 }
 
 void bt_keyboard_get_status(BTKeyboardStatus *out) {
@@ -130,7 +157,9 @@ static void prv_cancel(void) {
   }
 }
 
-static void prv_fail(int error) {
+#define prv_fail(error) prv_fail_at(__func__, __LINE__, (error))
+static void prv_fail_at(const char *operation, unsigned line, int error) {
+  PBL_LOG_WRN("Keyboard %s:%u failed (rc=0x%04x)", operation, line, (uint16_t)error);
   s_reconnect = false;
   prv_publish(BTKeyboardStateError, error);
   prv_cancel();
@@ -145,11 +174,30 @@ static void prv_retry_later(void) {
 }
 
 static void prv_connection_failed(int error) {
+  PBL_LOG_DBG("Keyboard connection interrupted (rc=0x%04x)", (uint16_t)error);
   s_have_peer = false;
   bool reconnect = s_reconnect;
-  prv_fail(error);
+  s_reconnect = false;
+  prv_publish(BTKeyboardStateError, error);
+  prv_cancel();
   s_reconnect = reconnect;
   prv_retry_later();
+}
+
+static void prv_security_failed(int error) {
+  bool transient = error == BLE_HS_ENOTCONN || error == BLE_HS_ETIMEOUT ||
+                   error == BLE_HS_ETIMEOUT_HCI || error == BLE_HS_EBUSY ||
+                   error == BLE_HS_EAGAIN || error == BLE_HS_ENOMEM ||
+                   error == BLE_HS_HCI_ERR(BLE_ERR_CONN_SPVN_TMO) ||
+                   error == BLE_HS_HCI_ERR(BLE_ERR_CONN_ESTABLISHMENT) ||
+                   error == BLE_HS_HCI_ERR(BLE_ERR_LMP_LL_RSP_TMO) ||
+                   error == BLE_HS_HCI_ERR(BLE_ERR_REM_USER_CONN_TERM) ||
+                   error == BLE_HS_HCI_ERR(BLE_ERR_CONN_TERM_LOCAL);
+  if (!s_pair_requested && transient) {
+    prv_connection_failed(error);
+  } else {
+    prv_fail(error);
+  }
 }
 
 static bool prv_current(uint16_t conn, void *arg) {
@@ -166,12 +214,29 @@ bool nimble_keyboard_owns_peer(const ble_addr_t *peer) {
           ble_addr_cmp(peer, &desc.peer_ota_addr) == 0);
 }
 
+static int prv_count_gateway_bond(int obj_type, union ble_store_value *value, void *context) {
+  if (!nimble_keyboard_owns_peer(&value->sec.peer_addr)) {
+    ++*(int *)context;
+  }
+  return 0;
+}
+
+bool nimble_keyboard_has_gateway_bond(void) {
+  int count = 0;
+  int rc = ble_store_iterate(BLE_STORE_OBJ_TYPE_PEER_SEC, prv_count_gateway_bond, &count);
+  if (rc) {
+    PBL_LOG_WRN("Keyboard gateway-bond lookup failed (rc=0x%04x)", (uint16_t)rc);
+  }
+  return rc == 0 && count > 0;
+}
+
 static void prv_forget(void) {
   ble_addr_t peer;
   if (nimble_keyboard_store_get(&peer, NULL)) {
     // Remove controller and in-memory keys while this is still classified as an accessory.
     int rc = ble_hs_is_enabled() ? ble_gap_unpair(&peer) : ble_store_util_delete_peer(&peer);
     if (rc) {
+      PBL_LOG_WRN("Keyboard unpair failed (rc=0x%04x)", (uint16_t)rc);
       s_forget_pending = false;
       prv_publish(BTKeyboardStateError, rc);
       return;
@@ -179,6 +244,7 @@ static void prv_forget(void) {
   }
   int rc = nimble_keyboard_store_forget();
   if (rc) {
+    PBL_LOG_WRN("Keyboard bond deletion failed (rc=0x%04x)", (uint16_t)rc);
     // A failed flash write must leave the existing bond usable in this session.
     nimble_keyboard_store_restore_keys();
     s_restore_irk_pending = ble_hs_is_enabled() && nimble_keyboard_store_restore_irk() != 0;
@@ -320,10 +386,10 @@ static void prv_encrypted(int status) {
     }
   }
   if (rc) {
-    prv_fail(rc);
+    prv_security_failed(rc);
     return;
   }
-  if (s_status.state != BTKeyboardStatePairing) {
+  if (s_status.state != BTKeyboardStatePairing && s_status.state != BTKeyboardStateEncrypting) {
     return;
   }
   s_peer = desc.peer_id_addr;
@@ -337,7 +403,7 @@ static void prv_encrypted(int status) {
   }
 }
 
-static void prv_connect(const ble_addr_t *peer) {
+static void prv_connect(const ble_addr_t *peer, bool explicit_request) {
   uint8_t own_type;
   int rc = ble_hs_id_infer_auto(0, &own_type);
   if (rc) {
@@ -350,8 +416,9 @@ static void prv_connect(const ble_addr_t *peer) {
   s_connecting = true;
   prv_publish(BTKeyboardStateConnecting, 0);
   const struct ble_gap_conn_params params = {
-    .scan_itvl = 0x100, // 160 ms, with a 10 ms window to limit background power use.
-    .scan_window = 0x10,
+    // User actions scan continuously; background attempts use a 10 ms / 160 ms duty cycle.
+    .scan_itvl = explicit_request ? 0x30 : 0x100,
+    .scan_window = explicit_request ? 0x30 : 0x10,
     .itvl_min = 24,
     .itvl_max = 40,
     .supervision_timeout = 400,
@@ -416,7 +483,7 @@ static void prv_advertisement(const struct ble_gap_disc_desc *disc) {
     prv_fail(rc);
     return;
   }
-  prv_connect(&disc->addr);
+  prv_connect(&disc->addr, true);
 }
 
 static void prv_passkey(const struct ble_gap_event *event) {
@@ -441,6 +508,40 @@ static void prv_passkey(const struct ble_gap_event *event) {
   rc = ble_sm_inject_io(s_conn, &io);
   if (rc) {
     prv_fail(rc);
+  }
+}
+
+static void prv_bound_connection_params(struct ble_gap_upd_params *params) {
+  if (params->itvl_max < 6) {
+    params->itvl_max = 6;
+  } else if (params->itvl_max > MAX_CONN_INTERVAL) {
+    params->itvl_max = MAX_CONN_INTERVAL;
+  }
+  if (params->itvl_min < 6) {
+    params->itvl_min = 6;
+  } else if (params->itvl_min > params->itvl_max) {
+    params->itvl_min = params->itvl_max;
+  }
+  // Peripheral latency saves power while idle; a keyboard can transmit earlier on a keypress.
+  uint16_t max_latency = MAX_IDLE_INTERVAL / params->itvl_max - 1;
+  if (max_latency > 499) {
+    max_latency = 499;
+  }
+  if (params->latency > max_latency) {
+    params->latency = max_latency;
+  }
+  // Supervision timeout (10 ms) must exceed twice the maximum effective interval (1.25 ms).
+  uint16_t min_timeout = params->itvl_max * (params->latency + 1) / 4 + 1;
+  if (min_timeout < 10) {
+    min_timeout = 10;
+  }
+  if (params->supervision_timeout < min_timeout) {
+    params->supervision_timeout = min_timeout;
+  } else if (params->supervision_timeout > 3200) {
+    params->supervision_timeout = 3200;
+  }
+  if (params->min_ce_len > params->max_ce_len) {
+    params->min_ce_len = params->max_ce_len;
   }
 }
 
@@ -471,12 +572,12 @@ static int prv_gap_event(struct ble_gap_event *event, void *arg) {
         break;
       }
       s_conn = event->connect.conn_handle;
-      prv_publish(BTKeyboardStatePairing, 0);
+      prv_publish(s_pair_requested ? BTKeyboardStatePairing : BTKeyboardStateEncrypting, 0);
       {
         // Only explicit Pair can generate new keys. Reconnect requires a stored LTK.
         int rc = ble_gap_security_initiate(s_conn);
-        if (rc) {
-          prv_fail(rc);
+        if (rc && rc != BLE_HS_EALREADY) {
+          prv_security_failed(rc);
         }
       }
       break;
@@ -520,8 +621,16 @@ static int prv_gap_event(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_REPEAT_PAIRING:
       return BLE_GAP_REPEAT_PAIRING_IGNORE;
     case BLE_GAP_EVENT_PAIRING_COMPLETE:
-      if (current && event->pairing_complete.status) {
-        prv_fail(event->pairing_complete.status);
+      if (current && event->pairing_complete.conn_handle == s_conn &&
+          event->pairing_complete.status) {
+        // Reconnect failures receive a precise host status in the following ENC_CHANGE event.
+        // Pairing's raw SMP status cannot distinguish a transport timeout from a bad key.
+        if (s_pair_requested) {
+          prv_fail(event->pairing_complete.status);
+        } else {
+          PBL_LOG_DBG("Keyboard security completion (smp=0x%04x)",
+                      (uint16_t)event->pairing_complete.status);
+        }
       }
       break;
     case BLE_GAP_EVENT_IDENTITY_RESOLVED:
@@ -545,7 +654,12 @@ static int prv_gap_event(struct ble_gap_event *event, void *arg) {
       }
       break;
     case BLE_GAP_EVENT_CONN_UPDATE_REQ:
+    case BLE_GAP_EVENT_L2CAP_UPDATE_REQ:
+      if (!current || event->conn_update_req.conn_handle != s_conn) {
+        return BLE_ERR_UNK_CONN_ID;
+      }
       *event->conn_update_req.self_params = *event->conn_update_req.peer_params;
+      prv_bound_connection_params(event->conn_update_req.self_params);
       break;
     default:
       break;
@@ -658,7 +772,7 @@ static void prv_command(struct ble_npl_event *event) {
       s_restore_irk_pending = false;
     }
     if (nimble_keyboard_store_get_connection_addr(&peer)) {
-      prv_connect(&peer);
+      prv_connect(&peer, command == KeyboardCommandConnect);
     }
   } else {
     prv_publish(BTKeyboardStateIdle, 0);
