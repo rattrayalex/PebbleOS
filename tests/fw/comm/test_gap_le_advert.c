@@ -49,8 +49,26 @@ void gap_le_slave_reconnect_start(void) {
 void gatt_service_changed_server_cleanup_by_connection(GAPLEConnection *connection) {
 }
 
+static bool s_defer_callbacks;
+static void (*s_queued_callback)(void *);
+static void *s_queued_context;
+
 void launcher_task_add_callback(void (*callback)(void *data), void *data) {
-  callback(data);
+  if (s_defer_callbacks) {
+    cl_assert(!s_queued_callback);
+    s_queued_callback = callback;
+    s_queued_context = data;
+  } else {
+    callback(data);
+  }
+}
+
+static void prv_drain_callback(void) {
+  cl_assert(s_queued_callback);
+  void (*callback)(void *) = s_queued_callback;
+  s_queued_callback = NULL;
+  s_defer_callbacks = false;
+  callback(s_queued_context);
 }
 
 static uint32_t s_unscheduled_cb_count;
@@ -67,6 +85,9 @@ static void unscheduled_callback(GAPLEAdvertisingJobRef job, bool completed, voi
 
 void test_gap_le_advert__initialize(void) {
   fake_bt_driver_advert_init();
+  s_defer_callbacks = false;
+  s_queued_callback = NULL;
+  s_queued_context = NULL;
 
   s_unscheduled_cb_count = 0;
   s_unscheduled_job = NULL;
@@ -726,27 +747,50 @@ void test_gap_le_advert__preemption_resumes_current_job(void) {
   free(ad);
 }
 
-void test_gap_le_advert__preemption_does_not_advertise_while_connected(void) {
+static GAPLEAdvertisingJobRef prv_queue_preempted_job(void) {
   BLEAdData *ad = create_ad("phone", NULL);
   GAPLEAdvertisingJobTerm term = {
     .interval = GAPLEAdvertisingInterval_Short,
     .duration_secs = 10,
   };
   GAPLEAdvertisingJobRef job = gap_le_advert_schedule(ad, &term, 1, NULL, NULL, 0);
+  cl_assert(job);
+  free(ad);
   gap_le_set_advertising_disabled();
-  gap_le_advert_handle_connect_as_slave();
+  s_defer_callbacks = true;
   bt_driver_advert_handle_preempted();
+  cl_assert(s_queued_callback);
+  cl_assert(!gap_le_is_advertising_enabled());
+  return job;
+}
+
+void test_gap_le_advert__preemption_does_not_advertise_after_phone_connects(void) {
+  GAPLEAdvertisingJobRef job = prv_queue_preempted_job();
+  gap_le_advert_handle_connect_as_slave();
+  prv_drain_callback();
   cl_assert(!gap_le_is_advertising_enabled());
   gap_le_advert_handle_disconnect_as_slave();
   cl_assert(gap_le_is_advertising_enabled());
   gap_le_advert_unschedule(job);
-  free(ad);
 }
 
-void test_gap_le_advert__preemption_without_job_or_after_shutdown(void) {
-  bt_driver_advert_handle_preempted();
-  cl_assert(!gap_le_is_advertising_enabled());
+void test_gap_le_advert__preemption_does_not_advertise_after_shutdown(void) {
+  prv_queue_preempted_job();
   gap_le_advert_deinit();
+  prv_drain_callback();
+  cl_assert(!gap_le_is_advertising_enabled());
+  cl_assert_equal_i(regular_timer_seconds_count(), 0);
+}
+
+void test_gap_le_advert__preemption_does_not_restore_an_unscheduled_job(void) {
+  GAPLEAdvertisingJobRef job = prv_queue_preempted_job();
+  gap_le_advert_unschedule(job);
+  prv_drain_callback();
+  cl_assert(!gap_le_is_advertising_enabled());
+  cl_assert_equal_i(regular_timer_seconds_count(), 0);
+}
+
+void test_gap_le_advert__preemption_without_job(void) {
   bt_driver_advert_handle_preempted();
   cl_assert(!gap_le_is_advertising_enabled());
   cl_assert_equal_i(regular_timer_seconds_count(), 0);
