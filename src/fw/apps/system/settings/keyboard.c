@@ -4,7 +4,6 @@
 #include "keyboard.h"
 #include "window.h"
 
-#include "applib/app_timer.h"
 #include "applib/event_service_client.h"
 #include "applib/ui/app_window_stack.h"
 #include "applib/ui/menu_layer.h"
@@ -17,13 +16,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#define KEYBOARD_UPDATE_INTERVAL_MS 500
-
 typedef struct {
   SettingsCallbacks callbacks;
   Window *window;
-  AppTimer *update_timer;
-  EventServiceInfo focus_event_info;
+  EventServiceInfo status_event_info;
   BTKeyboardStatus status;
 } SettingsKeyboardData;
 
@@ -35,7 +31,8 @@ enum {
 
 static bool prv_is_busy(const BTKeyboardStatus *status) {
   return status->state == BTKeyboardStateScanning || status->state == BTKeyboardStateConnecting ||
-         status->state == BTKeyboardStatePairing || status->state == BTKeyboardStateDiscovering;
+         status->state == BTKeyboardStateEncrypting || status->state == BTKeyboardStatePairing ||
+         status->state == BTKeyboardStateDiscovering;
 }
 
 static const char *prv_status_text(const BTKeyboardStatus *status) {
@@ -47,6 +44,7 @@ static const char *prv_status_text(const BTKeyboardStatus *status) {
     case BTKeyboardStateScanning:
       return i18n_noop("Searching...");
     case BTKeyboardStateConnecting:
+    case BTKeyboardStateEncrypting:
       return i18n_noop("Connecting...");
     case BTKeyboardStatePairing:
       return i18n_noop("Pairing...");
@@ -99,45 +97,22 @@ static void prv_refresh(SettingsKeyboardData *data) {
   settings_menu_reload_data(SettingsMenuItemKeyboard);
 }
 
-static void prv_update_timer_cb(void *context) {
-  SettingsKeyboardData *data = context;
-  data->update_timer = NULL;
-  if (app_window_stack_get_top_window() != data->window) {
-    return;
-  }
-  prv_refresh(data);
-  data->update_timer = app_timer_register(KEYBOARD_UPDATE_INTERVAL_MS, prv_update_timer_cb, data);
-}
-
 static void prv_appear_cb(SettingsCallbacks *context) {
-  SettingsKeyboardData *data = (SettingsKeyboardData *)context;
-  prv_refresh(data);
-  if (!data->update_timer) {
-    data->update_timer = app_timer_register(KEYBOARD_UPDATE_INTERVAL_MS, prv_update_timer_cb, data);
-  }
+  prv_refresh((SettingsKeyboardData *)context);
 }
 
-static void prv_hide_cb(SettingsCallbacks *context) {
-  SettingsKeyboardData *data = (SettingsKeyboardData *)context;
-  if (data->update_timer) {
-    app_timer_cancel(data->update_timer);
-    data->update_timer = NULL;
-  }
-}
-
-static void prv_focus_event_handler(PebbleEvent *event, void *context) {
+static void prv_status_event_handler(PebbleEvent *event, void *context) {
   SettingsKeyboardData *data = context;
-  if (!event->app_focus.in_focus) {
-    prv_hide_cb(&data->callbacks);
-  } else if (app_window_stack_get_top_window() == data->window) {
-    prv_appear_cb(&data->callbacks);
+  // The shared Settings reload helper addresses the current app-state window.
+  // A covered window refreshes on appear instead of touching another submenu.
+  if (app_window_stack_get_top_window() == data->window) {
+    prv_refresh(data);
   }
 }
 
 static void prv_deinit_cb(SettingsCallbacks *context) {
   SettingsKeyboardData *data = (SettingsKeyboardData *)context;
-  prv_hide_cb(context);
-  event_service_client_unsubscribe(&data->focus_event_info);
+  event_service_client_unsubscribe(&data->status_event_info);
   i18n_free_all(data);
   app_free(data);
 }
@@ -234,16 +209,15 @@ static Window *prv_init(void) {
     .num_rows = prv_num_rows_cb,
     .row_height = prv_row_height_cb,
     .appear = prv_appear_cb,
-    .hide = prv_hide_cb,
   };
   bt_keyboard_get_status(&data->status);
   data->window = settings_window_create(SettingsMenuItemKeyboard, &data->callbacks);
-  data->focus_event_info = (EventServiceInfo){
-    .type = PEBBLE_APP_WILL_CHANGE_FOCUS_EVENT,
-    .handler = prv_focus_event_handler,
+  data->status_event_info = (EventServiceInfo){
+    .type = PEBBLE_BT_KEYBOARD_STATUS_CHANGED_EVENT,
+    .handler = prv_status_event_handler,
     .context = data,
   };
-  event_service_client_subscribe(&data->focus_event_info);
+  event_service_client_subscribe(&data->status_event_info);
   return data->window;
 }
 

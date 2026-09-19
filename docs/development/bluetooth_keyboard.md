@@ -38,8 +38,11 @@ for reconnect; unknown devices are never paired in the background.
 
 Background reconnect uses ten-second connection attempts with a sixty-second
 pause between attempts. A sleeping keyboard can therefore take over a minute
-to reconnect. **Connect** starts an immediate attempt; **Disconnect** stops
-background attempts until Connect or the next Bluetooth restart.
+to reconnect. **Connect** starts an immediate attempt with a faster scan duty
+cycle; **Disconnect** stops background attempts until Connect or the next
+Bluetooth restart. Temporary connection/encryption transport failures retry
+for the saved bond. Authentication failures and missing keys require explicit
+user action.
 
 | Keyboard key | Pebble button |
 | --- | --- |
@@ -79,7 +82,12 @@ invalid report lengths, HID error reports, disconnect releases, and
 overlapping keyboard and physical button holds. Bond-store tests cover
 credential validation, persistence, invalid records, and write failures.
 Driver tests cover pairing and reconnect, scan responses, notification gates,
-cancellation, host resets, stopped-state cleanup, and failed-Forget rollback.
+cancellation, host resets, stopped-state cleanup, failed-Forget rollback,
+transient encryption failures, peer ownership, gateway-bond isolation,
+connection parameter bounds, and coalesced status events. Advertising tests
+cover privacy-list preemption and deferred connection/shutdown transitions.
+Native framebuffer tests cover Settings states on round and rectangular
+screens, including passkeys with leading zeros and large text.
 
 ```shell
 pbl test --no-images -R keyboard
@@ -101,4 +109,12 @@ battery impact. Before enabling this feature in released firmware, test:
 - Round and rectangular Settings layouts, including six-digit passkeys
   with leading zeros.
 - Controller capacity, heap/stack use, and battery drain with the keyboard
-  connected and absent.
+  connected and absent. Measure the 5,000-byte NimBLE host stack during
+  cold boot, Bluetooth restart, pairing/save, Forget, and failed-Forget
+  rollback; bond storage remains serialized on that task.
+
+Record the exact keyboard model and firmware, watch board and commit, phone
+model/OS, negotiated pairing mode, discovered HID characteristics, and traces
+for each result. No physical keyboard has been validated yet. Native frames
+validate rendering with synthetic statuses; they do not establish on-device
+Bluetooth behavior.
