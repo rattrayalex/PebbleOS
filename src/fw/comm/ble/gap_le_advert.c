@@ -647,7 +647,7 @@ static void prv_advert_preempted_cb(void *unused) {
 }
 
 void bt_driver_advert_handle_preempted(void) {
-  // Resolving-list edits can notify us while the host owns its security locks.
+  // Defer beyond the host's security locks.
   launcher_task_add_callback(prv_advert_preempted_cb, NULL);
 }
 
