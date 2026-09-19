@@ -131,12 +131,13 @@ endfunction()
 #   OVERRIDES  directories under tests/overrides/ that come first on the
 #              header search path
 #   LIBS       extra libraries to link
+#   LINK_OPTIONS extra linker options
 #   DEPENDS    targets that have to be built first, for a test that needs
 #              a generated header
 #   TEST_IMAGES  the test renders against the image fixtures
 function(pbl_clar_test name)
   cmake_parse_arguments(ARG "TEST_IMAGES" "SOURCE"
-    "SOURCES;PLATFORMS;DEFINES;INCLUDES;OVERRIDES;LIBS;DEPENDS" ${ARGN})
+    "SOURCES;PLATFORMS;DEFINES;INCLUDES;OVERRIDES;LIBS;LINK_OPTIONS;DEPENDS" ${ARGN})
   if(ARG_UNPARSED_ARGUMENTS)
     message(FATAL_ERROR "pbl_clar_test(${name}): unknown arguments ${ARG_UNPARSED_ARGUMENTS}")
   endif()
@@ -181,6 +182,7 @@ function(pbl_clar_test name)
     set_property(GLOBAL PROPERTY PBL_TEST_${id}_INCLUDES "${ARG_INCLUDES}")
     set_property(GLOBAL PROPERTY PBL_TEST_${id}_OVERRIDES "${ARG_OVERRIDES}")
     set_property(GLOBAL PROPERTY PBL_TEST_${id}_LIBS "${ARG_LIBS}")
+    set_property(GLOBAL PROPERTY PBL_TEST_${id}_LINK_OPTIONS "${ARG_LINK_OPTIONS}")
     set_property(GLOBAL PROPERTY PBL_TEST_${id}_DEPENDS "${ARG_DEPENDS}")
     set_property(GLOBAL PROPERTY PBL_TEST_${id}_IMAGES "${ARG_TEST_IMAGES}")
   endforeach()
@@ -223,7 +225,7 @@ function(pbl_test_finalize)
 endfunction()
 
 function(_pbl_test_add id)
-  foreach(field NAME PLATFORM DIR BINDIR SOURCE SOURCES DEFINES INCLUDES OVERRIDES LIBS DEPENDS IMAGES)
+  foreach(field NAME PLATFORM DIR BINDIR SOURCE SOURCES DEFINES INCLUDES OVERRIDES LIBS LINK_OPTIONS DEPENDS IMAGES)
     get_property(${field} GLOBAL PROPERTY PBL_TEST_${id}_${field})
   endforeach()
 
@@ -338,6 +340,7 @@ function(_pbl_test_add id)
     list(APPEND libs duma pthread)
   endif()
   target_link_libraries(${id} PRIVATE ${libs} m)
+  target_link_options(${id} PRIVATE ${LINK_OPTIONS})
   if(IMAGES)
     add_dependencies(${id} pbl_test_images)
   endif()

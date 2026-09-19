@@ -35,6 +35,11 @@ the board defconfig. Pass to `pbl configure`. See {doc}`moddable`.
 PRF (recovery) builds always disable the engine regardless of this
 value.
 
+:`-DCONFIG_BT_KEYBOARD=y`:
+Enable experimental Bluetooth Low Energy keyboard navigation on NimBLE
+boards. Off by default and unavailable in recovery firmware. See
+{doc}`bluetooth_keyboard` for supported pairing, report formats, and validation.
+
 ## Manufacturing
 
 :`-DCONFIG_MFG=y`:

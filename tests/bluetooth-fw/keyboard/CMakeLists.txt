@@ -20,7 +20,7 @@ pbl_clar_test(test_keyboard_driver
     third_party/nimble/mynewt-nimble/porting/nimble/include
     third_party/nimble/mynewt-nimble/nimble/transport/include
   DEFINES CONFIG_BT_KEYBOARD CONFIG_BT_LOG_LEVEL=0
-  LIBS ${keyboard_link_options}
+  LINK_OPTIONS ${keyboard_link_options}
 )
 
 pbl_clar_test(test_keyboard_store
@@ -35,5 +35,5 @@ pbl_clar_test(test_keyboard_store
     third_party/nimble/mynewt-nimble/nimble/transport/include
     third_party/nimble/mynewt-nimble/porting/nimble/include
   DEFINES CONFIG_BT_KEYBOARD
-  LIBS ${keyboard_link_options}
+  LINK_OPTIONS ${keyboard_link_options}
 )
