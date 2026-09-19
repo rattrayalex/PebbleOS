@@ -638,4 +638,17 @@ unlock:
   bt_unlock();
 }
 
+static void prv_advert_preempted_cb(void *unused) {
+  bt_lock();
+  if (s_gap_le_advert_is_initialized && !s_deinit_in_progress && !s_is_connected) {
+    prv_perform_next_job(true /* controller stopped advertising */);
+  }
+  bt_unlock();
+}
+
+void bt_driver_advert_handle_preempted(void) {
+  // Resolving-list edits can notify us while the host owns its security locks.
+  launcher_task_add_callback(prv_advert_preempted_cb, NULL);
+}
+
 #undef GAP_LE_ADVERT_LOG_LEVEL

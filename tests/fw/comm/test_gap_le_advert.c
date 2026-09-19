@@ -7,6 +7,7 @@
 #include "pbl/util/size.h"
 
 #include "clar.h"
+#include <bluetooth/bt_driver_advert.h>
 
 // Fakes
 ///////////////////////////////////////////////////////////
@@ -705,4 +706,48 @@ void test_gap_le_advert__unschedule_job_types(void) {
   cl_assert_equal_b(gap_le_is_advertising_enabled(), false);
 
   free(ad);
+}
+
+void test_gap_le_advert__preemption_resumes_current_job(void) {
+  BLEAdData *ad = create_ad("keyboard pairing", NULL);
+  GAPLEAdvertisingJobTerm term = {
+    .interval = GAPLEAdvertisingInterval_Long,
+    .duration_secs = 10,
+  };
+  GAPLEAdvertisingJobRef job = gap_le_advert_schedule(ad, &term, 1, NULL, NULL, 0);
+  cl_assert(job);
+  gap_le_set_advertising_disabled();
+  bt_driver_advert_handle_preempted();
+  cl_assert(gap_le_is_advertising_enabled());
+  assert_ad_data("keyboard pairing");
+  gap_le_assert_advertising_interval(GAPLEAdvertisingInterval_Long);
+  cl_assert_equal_i(regular_timer_seconds_count(), 1);
+  gap_le_advert_unschedule(job);
+  free(ad);
+}
+
+void test_gap_le_advert__preemption_does_not_advertise_while_connected(void) {
+  BLEAdData *ad = create_ad("phone", NULL);
+  GAPLEAdvertisingJobTerm term = {
+    .interval = GAPLEAdvertisingInterval_Short,
+    .duration_secs = 10,
+  };
+  GAPLEAdvertisingJobRef job = gap_le_advert_schedule(ad, &term, 1, NULL, NULL, 0);
+  gap_le_set_advertising_disabled();
+  gap_le_advert_handle_connect_as_slave();
+  bt_driver_advert_handle_preempted();
+  cl_assert(!gap_le_is_advertising_enabled());
+  gap_le_advert_handle_disconnect_as_slave();
+  cl_assert(gap_le_is_advertising_enabled());
+  gap_le_advert_unschedule(job);
+  free(ad);
+}
+
+void test_gap_le_advert__preemption_without_job_or_after_shutdown(void) {
+  bt_driver_advert_handle_preempted();
+  cl_assert(!gap_le_is_advertising_enabled());
+  gap_le_advert_deinit();
+  bt_driver_advert_handle_preempted();
+  cl_assert(!gap_le_is_advertising_enabled());
+  cl_assert_equal_i(regular_timer_seconds_count(), 0);
 }

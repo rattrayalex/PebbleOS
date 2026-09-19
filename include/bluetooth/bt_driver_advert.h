@@ -15,3 +15,6 @@ void bt_driver_advert_advertising_disable(void);
 bool bt_driver_advert_client_get_tx_power(int8_t *tx_power);
 
 bool bt_driver_advert_set_advertising_data(const BLEAdData *ad_data);
+
+//! Notify the scheduler after a controller operation preempts advertising.
+void bt_driver_advert_handle_preempted(void);
