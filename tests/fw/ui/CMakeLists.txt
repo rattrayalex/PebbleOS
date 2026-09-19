@@ -404,7 +404,7 @@ pbl_clar_test(test_settings_keyboard
     src/fw/applib/ui/status_bar_layer.c
     tests/fakes/fake_clock.c
   DEFINES CONFIG_BT_KEYBOARD
-  PLATFORMS obelix gabbro
+  PLATFORMS obelix gabbro asterix
   OVERRIDES dummy_board
   TEST_IMAGES
 )

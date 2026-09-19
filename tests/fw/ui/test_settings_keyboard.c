@@ -56,7 +56,7 @@ static EventServiceInfo *s_events[8];
 #include "stubs_window_stack.h"
 
 GColor shell_prefs_get_theme_highlight_color(void) {
-  return GColorVividCerulean;
+  return PBL_IF_COLOR_ELSE(GColorVividCerulean, GColorBlack);
 }
 
 GContext *graphics_context_get_current_context(void) {
@@ -338,12 +338,13 @@ void test_settings_keyboard__render_states(void) {
   };
   const uint16_t selections[] = {1, 1, 1, 2, 0, 0, 1};
   const int padding = 8;
-  GBitmap *grid =
-      gbitmap_create_blank(GSize(padding + NumPreferredContentSizes * (DISP_COLS + padding),
-                                 padding + ARRAY_LENGTH(states) * (DISP_ROWS + padding)),
-                           GBitmapFormat8Bit);
+  GBitmap *grid = prv_gbitmap_create_blank_internal_no_platform_checks(
+      GSize(padding + NumPreferredContentSizes * (DISP_COLS + padding),
+            padding + ARRAY_LENGTH(states) * (DISP_ROWS + padding)),
+      GBitmapFormat8Bit);
   cl_assert(grid);
-  memset(grid->addr, GColorDarkGrayARGB8, grid->row_size_bytes * grid->bounds.size.h);
+  memset(grid->addr, PBL_IF_COLOR_ELSE(GColorDarkGrayARGB8, GColorWhiteARGB8),
+         grid->row_size_bytes * grid->bounds.size.h);
   for (int size = 0; size < NumPreferredContentSizes; ++size) {
     system_theme_set_content_size(size);
     for (unsigned int state = 0; state < ARRAY_LENGTH(states); ++state) {
@@ -364,10 +365,19 @@ void test_settings_keyboard__render_states(void) {
         const GBitmapDataRowInfo row = gbitmap_get_data_row_info(frame, y);
         uint8_t *dest = (uint8_t *)grid->addr + (top + y) * grid->row_size_bytes + left;
         memset(dest, GColorBlackARGB8, DISP_COLS);
+#if PBL_COLOR
         memcpy(dest + row.min_x, row.data + row.min_x, row.max_x - row.min_x + 1);
+#else
+        for (int x = 0; x < DISP_COLS; ++x) {
+          const uint8_t value = prv_raw_image_get_value_for_format(
+              row.data, x, 0, frame->row_size_bytes, 1, GBitmapFormat1Bit);
+          dest[x] = prv_convert_to_gcolor8(GBitmapFormat1Bit, value, NULL).argb;
+        }
+#endif
       }
       if (getenv("PEBBLE_KEYBOARD_CAPTURE_FRAMES")) {
-        GBitmap *single = gbitmap_create_blank(GSize(DISP_COLS, DISP_ROWS), GBitmapFormat8Bit);
+        GBitmap *single = prv_gbitmap_create_blank_internal_no_platform_checks(
+            GSize(DISP_COLS, DISP_ROWS), GBitmapFormat8Bit);
         cl_assert(single);
         for (int y = 0; y < DISP_ROWS; ++y) {
           const uint8_t *source = (uint8_t *)grid->addr + (top + y) * grid->row_size_bytes + left;
