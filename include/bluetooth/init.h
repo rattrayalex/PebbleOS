@@ -35,3 +35,7 @@ void bt_driver_power_down_controller_on_boot(void);
 //! Consumers can use this to refresh controller state that gets wiped on a host reset
 //! (e.g. advertising data and parameters).
 extern void bt_driver_handle_host_resynced(void);
+
+//! Invoked by the BT driver after a controller operation preempts advertising, so the firmware
+//! can reschedule it.
+extern void bt_driver_handle_advert_preempted(void);

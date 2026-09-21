@@ -6,6 +6,7 @@
 #include <bluetooth/bonding_sync.h>
 #include <bluetooth/bt_driver_advert.h>
 #include <bluetooth/gatt.h>
+#include <bluetooth/init.h>
 #include <bluetooth/pairing_confirm.h>
 #include <host/ble_gap.h>
 #include <kernel/pbl_malloc.h>
@@ -351,6 +352,12 @@ static void prv_handle_phy_update_event(struct ble_gap_event *event) {
 
 static int prv_handle_gap_event(struct ble_gap_event *event, void *arg) {
   switch (event->type) {
+    case BLE_GAP_EVENT_ADV_COMPLETE:
+      if (event->adv_complete.reason == BLE_HS_EPREEMPTED) {
+        PBL_LOG_DBG("Advertising preempted by controller update");
+        bt_driver_handle_advert_preempted();
+      }
+      break;
     case BLE_GAP_EVENT_CONNECT:
       PBL_LOG_DBG("BLE_GAP_EVENT_CONNECT");
       prv_handle_connection_event(event);
