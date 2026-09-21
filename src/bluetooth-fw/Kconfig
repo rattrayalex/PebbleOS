@@ -29,6 +29,16 @@ module = BT
 module-str = Bluetooth
 source "subsys/logging/Kconfig.template.log_level"
 
+config BT_KEYBOARD
+    bool "BLE keyboard navigation (experimental)"
+    depends on BT_FW_NIMBLE && !RECOVERY_FW
+    default n
+    help
+      Connect one authenticated Bluetooth LE boot-protocol keyboard alongside
+      the phone. Adds a Keyboard screen in Settings > Keyboard. Keyboards must
+      support LE Secure Connections with passkey entry; legacy and Just Works
+      pairing are not supported. Adds a second Bluetooth connection slot.
+
 config GH3X2X_TUNING_SERVICE_ENABLED
     bool "GH3X2X tuning service"
     depends on HRM_GH3X2X
