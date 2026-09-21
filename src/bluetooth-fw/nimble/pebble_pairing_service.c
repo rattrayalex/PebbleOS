@@ -12,6 +12,9 @@
 #include <system/passert.h>
 
 #include "nimble_type_conversions.h"
+#ifdef CONFIG_BT_KEYBOARD
+#include "keyboard_internal.h"
+#endif
 
 PBL_LOG_MODULE_DECLARE(bt, CONFIG_BT_LOG_LEVEL);
 
@@ -35,14 +38,21 @@ static int pebble_pairing_service_get_connectivity_status(
   struct ble_store_value_sec value_sec;
   bool is_bonded = (ble_store_read_peer_sec(&key_sec, &value_sec) == 0);
 
+#ifndef CONFIG_BT_KEYBOARD
   int bond_count = 0;
   ble_store_util_count(BLE_STORE_OBJ_TYPE_PEER_SEC, &bond_count);
+#endif
 
   memset(status, 0, sizeof(*status));
   status->ble_is_connected = true;
   status->ble_is_bonded = is_bonded;
   status->ble_is_encrypted = desc.sec_state.encrypted;
+#ifdef CONFIG_BT_KEYBOARD
+  // A keyboard bond is not a gateway, so the count cannot answer this any more.
+  status->has_bonded_gateway = nimble_keyboard_has_gateway_bond();
+#else
   status->has_bonded_gateway = (bond_count > 0);
+#endif
   status->supports_pinning_without_security_request = true;
 
   return 0;
