@@ -3,6 +3,9 @@
 
 #include "activity_tracker.h"
 #include "bluetooth.h"
+#ifdef CONFIG_BT_KEYBOARD
+#include "keyboard.h"
+#endif
 #include "display.h"
 #include "menu.h"
 #include "notifications.h"
@@ -22,6 +25,9 @@
 
 static const SettingsModuleGetMetadata s_submodule_registry[] = {
   [SettingsMenuItemBluetooth] = settings_bluetooth_get_info,
+#ifdef CONFIG_BT_KEYBOARD
+  [SettingsMenuItemKeyboard] = settings_keyboard_get_info,
+#endif
   [SettingsMenuItemNotifications] = settings_notifications_get_info,
   [SettingsMenuItemVibrations] = settings_vibe_patterns_get_info,
   [SettingsMenuItemQuietTime] = settings_quiet_time_get_info,

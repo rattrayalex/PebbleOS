@@ -12,6 +12,9 @@
 
 typedef enum {
   SettingsMenuItemBluetooth = 0,
+#ifdef CONFIG_BT_KEYBOARD
+  SettingsMenuItemKeyboard,
+#endif
   SettingsMenuItemNotifications,
   SettingsMenuItemVibrations,
   SettingsMenuItemQuietTime,
