@@ -12,3 +12,9 @@ pbl_clar_test(test_remote_input
     src/fw/kernel/remote_input.c
   DEFINES CONFIG_SERVICE_TOUCH
 )
+
+pbl_clar_test(test_keyboard_input
+  SOURCES
+    src/fw/kernel/keyboard_input.c
+  DEFINES CONFIG_BT_KEYBOARD
+)
