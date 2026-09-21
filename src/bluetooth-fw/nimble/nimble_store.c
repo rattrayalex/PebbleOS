@@ -281,9 +281,11 @@ static int prv_nimble_store_delete_sec(int obj_type, const struct ble_store_key_
   list_remove((ListNode *)s, sec_list, NULL);
   pbl_mutex_unlock(&s_store_mutex);
 
+  // An indexed delete may have BLE_ADDR_ANY as the key; use the actual peer.
+  ble_addr_t peer = s->value_sec.peer_addr;
   kernel_free(s);
 
-  nimble_addr_to_pebble_device(&key_sec->peer_addr, &device);
+  nimble_addr_to_pebble_device(&peer, &device);
   PBL_LOG_INFO("SEC delete: obj=%d addr=" BT_DEVICE_ADDRESS_FMT, obj_type,
                BT_DEVICE_ADDRESS_XPLODE(device.address));
   bt_persistent_storage_delete_ble_pairing_by_addr(&device);
